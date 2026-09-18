@@ -33,7 +33,11 @@ document.getElementById('setStorageData').addEventListener('click', () => {
   const data = document.getElementById('output').value;
   chrome.runtime.sendMessage({action: "setStorageData", data: data}, (response) => {
     if (response.success) {
-      alert('Storage data set successfully!');
+      if (response.warnings?.length) {
+        alert(`Storage data set with warnings:\n${response.warnings.join('\n')}`);
+      } else {
+        alert('Storage data set successfully!');
+      }
     } else {
       alert(`Failed to set storage data: ${response.error}`);
     }

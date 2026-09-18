@@ -38,11 +38,28 @@ async function handleGetAllStorageData(sendResponse) {
 async function handleSetStorageData(request, sendResponse) {
   try {
     const data = JSON.parse(request.data);
+    const cookies = Array.isArray(data.cookies) ? data.cookies : [];
+    const localStorage = data.localStorage && typeof data.localStorage === "object" && !Array.isArray(data.localStorage)
+      ? data.localStorage
+      : {};
+    const hasCookies = cookies.length > 0;
+    const hasLocalStorage = Object.keys(localStorage).length > 0;
+
+    if (!hasCookies && !hasLocalStorage) {
+      sendResponse({success: true});
+      return;
+    }
+
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
     await attachDebugger(tab.id);
-    await setCookies(tab.url, data.cookies);
-    await setLocalStorage(tab.id, data.localStorage);
-    sendResponse({success: true});
+    const cookieFailures = hasCookies ? await setCookies(tab.url, cookies) : [];
+    if (hasLocalStorage) {
+      await setLocalStorage(tab.id, localStorage);
+    }
+    sendResponse({
+      success: true,
+      ...(cookieFailures.length > 0 && {warnings: cookieFailures})
+    });
   } catch (error) {
     console.error("Error:", error);
     sendResponse({error: error.message});
@@ -101,12 +118,30 @@ async function getLocalStorage(tabId) {
 }
 
 async function setCookies(url, cookies) {
+  const failures = [];
+
   for (const cookie of cookies) {
-    await sendCommand("Network.setCookie", {
-      ...cookie,
-      url: url
-    });
+    const description = [cookie.name || "(unnamed cookie)", cookie.domain || url]
+      .filter(Boolean)
+      .join(" @ ");
+
+    try {
+      const result = await sendCommand("Network.setCookie", {
+        ...cookie,
+        url: url
+      });
+
+      if (result.success === false) {
+        throw new Error("Cookie was rejected by the browser");
+      }
+    } catch (error) {
+      const failure = `${description}: ${error.message || error}`;
+      failures.push(failure);
+      console.warn("Cookie import failed:", failure);
+    }
   }
+
+  return failures;
 }
 
 async function setLocalStorage(tabId, items) {
